@@ -15,25 +15,41 @@ struct DifferentiatorException : public std::exception {
 
   DifferentiatorException(const std::string& message = "", const std::string& function_name = ""):
     message(message), function_name(function_name) {}
+
+  virtual std::string getLabel() const {
+    return "Exception";
+  }
 };
 
 struct IncorrectArgumentException : public DifferentiatorException {
   IncorrectArgumentException(const std::string& message, const std::string& function_name = ""):
     DifferentiatorException(message, function_name) {}
+
+  std::string getLabel() const {
+    return "IncorrectArgumentException";
+  }
 };
 
 struct IncorrectParsingException : public DifferentiatorException {
   IncorrectParsingException(const std::string& message, const std::string& function_name = ""):
     DifferentiatorException(message, function_name) {}
+
+  std::string getLabel() const {
+    return "IncorrectParsingException";
+  }
 };
 
 struct DivisionByZeroException : public DifferentiatorException {
   DivisionByZeroException(const std::string& message, const std::string& function_name = ""):
     DifferentiatorException(message, function_name) {}
+
+  std::string getLabel() const {
+    return "DivisionByZeroException";
+  }
 };
 
 std::ostream& operator<<(std::ostream& os, const DifferentiatorException& iaexception) {
-  os << "!!! Exception: " << iaexception.message;
+  os << "!!! " << iaexception.getLabel() << ' ' << iaexception.message;
   if (!iaexception.function_name.empty()) {
     os << "(" << iaexception.function_name << ")";
   }

@@ -11,6 +11,14 @@
 #include <vector>
 
 #include "exception.h"
+#include "stack_allocator.h"
+
+#define PRINT_STEP(text)\
+{\
+  if (step_by_step_) {\
+    std::cout << (text);\
+  }\
+}
 
 enum NodeType {
   REAL_NUMBER,
@@ -20,6 +28,28 @@ enum NodeType {
   OPER_DIV,
   VARIABLE
 };
+
+bool isOperator(char ch) {
+  return ch == '+' || ch == '-' || ch == '*' || ch == '/';
+}
+
+bool isVariable(char ch) {
+  return ch >= 'a' && ch <= 'z';
+}
+
+bool isCharForDouble(char ch) {
+  return isdigit(ch) || ch == '.';
+}
+
+size_t operPriority(NodeType oper_type) {
+  if (oper_type == OPER_MINUS || oper_type == OPER_PLUS) {
+    return 1;
+  }
+  if (oper_type == OPER_MUL || oper_type == OPER_DIV) {
+    return 2;
+  }
+  throw IncorrectArgumentException("it is not an operator", __PRETTY_FUNCTION__);
+}
 
 NodeType getNodeTypeByOper(char oper) {
   switch (oper) {
@@ -33,6 +63,22 @@ NodeType getNodeTypeByOper(char oper) {
       return OPER_DIV;
     default:
       throw IncorrectArgumentException(std::string("no such operator provided: ") + oper,
+                                       __PRETTY_FUNCTION__);
+  }
+}
+
+char getOperByNodeType(NodeType node_type) {
+  switch (node_type) {
+    case OPER_PLUS:
+      return '+';
+    case OPER_MINUS:
+      return '-';
+    case OPER_MUL:
+      return '*';
+    case OPER_DIV:
+      return '/';
+    default:
+      throw IncorrectArgumentException(std::string("incorrect node_type: ") + std::to_string(node_type),
                                        __PRETTY_FUNCTION__);
   }
 }
@@ -54,7 +100,7 @@ struct Node {
     type(type), result(result), var_name(var_name) {}
 
   Node(NodeType type, Node* left_son, Node* right_son):
-    type(type) {
+    type(type), left_son(left_son), right_son(right_son) {
     if ((type == REAL_NUMBER || type == VARIABLE) &&
        (left_son != nullptr || right_son != nullptr)) {
       throw IncorrectArgumentException("node of such type should be a leaf",
@@ -67,31 +113,36 @@ struct Node {
     right_son = R;
   }
 
-  void destroy() {
-    delete left_son;
-    delete right_son;
+  std::string to_str() const {
+    switch (type) {
+      case OPER_MINUS:
+        return "-";
+      case OPER_PLUS:
+        return "+";
+      case OPER_MUL:
+        return "*";
+      case OPER_DIV:
+        return "/";
+      case VARIABLE:
+        return std::string("") + var_name;
+      case REAL_NUMBER:
+        return std::to_string(result);
+      default:
+        throw IncorrectArgumentException("incorrect type of node",
+                                         __PRETTY_FUNCTION__);
+    }
   }
 
-  ~Node() {
-    destroy();
+  bool operator==(const Node& another) const {
+    return type == another.type && result == another.result
+                                && var_name == another.var_name;
   }
 };
-
-bool isOperator(char ch) {
-  return ch == '+' || ch == '-' || ch == '*' || ch == '/';
-}
-
-bool isVariable(char ch) {
-  return ch >= 'a' && ch <= 'z';
-}
-
-bool isCharForDouble(char ch) {
-  return isdigit(ch) || ch == '.';
-}
 
 class Tree {
  private:
   Node* root_{nullptr};
+  bool step_by_step_{false};
 
   double parseDouble(const std::string& str, size_t* pos) {
     size_t cur_pos = *pos;
@@ -104,55 +155,46 @@ class Tree {
     return res_value;
   }
 
-  Node* getParentNode(Node* left_son, Node* right_son, NodeType node_type) {
-    Node* result_node = nullptr;
+  double parseDoubleRev(const std::string& str, int* pos) {
+    int cur_pos = *pos;
 
-    switch (node_type) {
-      case OPER_PLUS:
-        result_node = new Node{OPER_PLUS};
-        break;
-      case OPER_MINUS:
-        result_node = new Node{OPER_MINUS};
-        break;
-      case OPER_MUL:
-        result_node = new Node{OPER_MUL};
-        break;
-      case OPER_DIV:
-        result_node = new Node{OPER_DIV};
-        break;
-      default:
-        throw IncorrectArgumentException("an operator was expected", __PRETTY_FUNCTION__);
+    while (cur_pos >= 1 && isCharForDouble(str[cur_pos - 1])) {
+      --cur_pos;
     }
-    result_node->setSons(left_son, right_son);
+    double res_value = atof(str.substr(cur_pos, *pos - cur_pos + 1).c_str());
+    *pos = cur_pos;
+    return res_value;
+  }
 
+  Node* getParentNode(Node* left_son, Node* right_son, NodeType node_type) {
+    if (node_type == VARIABLE || node_type == REAL_NUMBER) {
+      throw IncorrectParsingException("a node that is not an operator can't be a parent",
+                                      __PRETTY_FUNCTION__);
+    }
+
+    Node* result_node = allocator_.init_alloc(Node{node_type, left_son, right_son});
     return result_node;
   }
 
   Node* calcNode(Node* left_son, Node* right_son, NodeType node_type) {
-    Node* result_node = new Node(REAL_NUMBER);
     double left_value = left_son->result;
     double right_value = right_son->result;
 
     switch (node_type) {
       case OPER_PLUS:
-        result_node = new Node{REAL_NUMBER, left_value + right_value};
-        break;
+        return allocator_.init_alloc(Node{REAL_NUMBER, left_value + right_value});
       case OPER_MINUS:
-        result_node = new Node{REAL_NUMBER, left_value - right_value};
-        break;
+        return allocator_.init_alloc(Node{REAL_NUMBER, left_value - right_value});
       case OPER_MUL:
-        result_node = new Node{REAL_NUMBER, left_value * right_value};
-        break;
+        return allocator_.init_alloc(Node{REAL_NUMBER, left_value * right_value});
       case OPER_DIV:
         if (right_value == 0.0) {
           throw DivisionByZeroException("", __PRETTY_FUNCTION__);
         }
-        result_node = new Node{REAL_NUMBER, left_value / right_value};
-        break;
+        return allocator_.init_alloc(Node{REAL_NUMBER, left_value / right_value});
       default:
         throw IncorrectArgumentException("an operator was expected", __PRETTY_FUNCTION__);
     }
-    return result_node;
   }
 
   void makeNiceVariable(Node* node, Node* left_son, Node* right_son, bool is_swapped = false) {
@@ -191,7 +233,7 @@ class Tree {
       Node* operand_a = operands.back(); operands.pop_back();
       char oper = opers.back(); opers.pop_back();
 
-      operands.push_back(getParentNode(operand_a, operand_b,
+      operands.push_back(getParentNode(operand_b, operand_a,
                                        getNodeTypeByOper(oper)));
     }
   }
@@ -225,43 +267,29 @@ class Tree {
     printPrefixRec(cur_node->right_son);
   }
 
-  void printInfixSubtree(Node* subtree_root) {
-    if (subtree_root && subtree_root->type != REAL_NUMBER && subtree_root->type != VARIABLE) {
-      std::cout << '(';
+  void getInfixSubtree(Node* parent_root, Node* subtree_root, std::string* infix_notation) {
+    if (!subtree_root) {
+      return;
     }
-    printInfixRec(subtree_root);
-    if (subtree_root && subtree_root->type != REAL_NUMBER && subtree_root->type != VARIABLE) {
-      std::cout << ')';
+    if (subtree_root->type != REAL_NUMBER && subtree_root->type != VARIABLE &&
+      operPriority(parent_root->type) > operPriority(subtree_root->type)) {
+      infix_notation->push_back('(');
+    }
+    getInfixRec(subtree_root, infix_notation);
+    if (subtree_root->type != REAL_NUMBER && subtree_root->type != VARIABLE &&
+      operPriority(parent_root->type) > operPriority(subtree_root->type)) {
+      infix_notation->push_back(')');
     }
   }
 
-  void printInfixRec(Node* cur_node) {
+  void getInfixRec(Node* cur_node, std::string* infix_notation) {
     if (cur_node == nullptr) {
       return;
     }
 
-    printInfixSubtree(cur_node->left_son);
-    switch (cur_node->type) {
-      case VARIABLE:
-        std::cout << cur_node->var_name;
-        break;
-      case REAL_NUMBER:
-        std::cout << cur_node->result;
-        break;
-      case OPER_PLUS:
-        std::cout << '+';
-        break;
-      case OPER_MINUS:
-        std::cout << '-';
-        break;
-      case OPER_MUL:
-        std::cout << '*';
-        break;
-      case OPER_DIV:
-        std::cout << '/';
-        break;
-    }
-    printInfixSubtree(cur_node->right_son);
+    getInfixSubtree(cur_node, cur_node->left_son, infix_notation);
+    *infix_notation += cur_node->to_str();
+    getInfixSubtree(cur_node, cur_node->right_son, infix_notation);
   }
 
   Tree(Node* root_node): root_(root_node) {}
@@ -271,11 +299,12 @@ class Tree {
       return nullptr;
     }
 
-    Node* result = new Node(node->type, node->result, node->var_name);
+    Node* result = allocator_.init_alloc(Node(node->type, node->result, node->var_name));
     Tree left_tree = recCopy(node->left_son);
     Tree right_tree = recCopy(node->right_son);
+    result->setSons(left_tree.root_, right_tree.root_);
 
-    return Tree(new Node(node->type, left_tree.root_, right_tree.root_));
+    return Tree(result);
   }
 
   void simplify(Node*& node) {
@@ -288,38 +317,74 @@ class Tree {
     if (node->left_son != nullptr && node->right_son != nullptr) {
       if (node->left_son->type == REAL_NUMBER && node->right_son->type == REAL_NUMBER) {
         node = calcNode(node->left_son, node->right_son, node->type);
-      } else if (node->left_son->type == VARIABLE) {
+      } else if (node->left_son->type == VARIABLE && node->right_son->type == REAL_NUMBER) {
         makeNiceVariable(node, node->left_son, node->right_son);
-      } else if (node->right_son->type == VARIABLE) {
+      } else if (node->right_son->type == VARIABLE && node->left_son->type == REAL_NUMBER) {
         makeNiceVariable(node, node->right_son, node->left_son, true);
+      } else if (node->type == OPER_MINUS &&
+                  *(node->left_son) == *(node->right_son)) {
+        node = allocator_.init_alloc(Node(REAL_NUMBER, 0.0));
+      } else if ((node->type == OPER_PLUS || node->type == OPER_MINUS) &&
+                  node->right_son->type == REAL_NUMBER && node->right_son->result == 0.0) {
+        node = node->left_son;
+      } else if ((node->type == OPER_PLUS || node->type == OPER_MINUS) &&
+        node->left_son->type == REAL_NUMBER && node->left_son->result == 0.0) {
+        node = node->right_son;
       }
     }
   }
 
   Tree diffirentiateRec(Node* node, char variable) {
-    if (node == nullptr) {
+    if (node == nullptr) {;
       return Tree(node);
     }
 
-    std::cout << "диффирнём немножечко \n";
-    std::cout << node->type << ' ' << node->var_name << '\n';
-
     if (node->type == REAL_NUMBER || (node->type == VARIABLE && node->var_name != variable)) {
-      std::cout << "differ is finished\n";
-      return Tree(new Node(REAL_NUMBER, 0.0));
+      PRINT_STEP(node->to_str());
+      PRINT_STEP("'=0\n");
+
+      return Tree(allocator_.init_alloc(Node(REAL_NUMBER, 0.0)));
     } else if (node->type == VARIABLE && node->var_name == variable) {
-      std::cout << "differ is finished\n";
-      return Tree(new Node(REAL_NUMBER, 1.0));
+      PRINT_STEP(node->to_str());
+      PRINT_STEP("'=1\n");
+      return Tree(allocator_.init_alloc(Node(REAL_NUMBER, 1.0)));
     }
+
+    std::string left_infix = Tree(node->left_son).getInfixNotation();
+    std::string right_infix = Tree(node->right_son).getInfixNotation();
 
     switch (node->type) {
       case OPER_PLUS:
       {
+        PRINT_STEP(std::string("считаем производную суммы "));
+        PRINT_STEP(left_infix + std::string(" и "));
+        PRINT_STEP(right_infix + "\n");
+
         Tree left_diff = diffirentiateRec(node->left_son, variable).root_;
         Tree right_diff = diffirentiateRec(node->right_son, variable).root_;
 
+        std::string left_diff_infix = left_diff.getInfixNotation();
+        std::string right_diff_infix = right_diff.getInfixNotation();
 
-        return left_diff + right_diff;
+
+        PRINT_STEP("(");
+        PRINT_STEP(left_infix + node->to_str());
+        PRINT_STEP(right_infix);
+        PRINT_STEP(")' = ");
+        PRINT_STEP("(");
+        PRINT_STEP(left_infix + ")'+");
+        PRINT_STEP("(");
+        PRINT_STEP(right_infix);
+        PRINT_STEP(")' = ");
+        PRINT_STEP(left_diff_infix);
+        PRINT_STEP("+");
+        PRINT_STEP(right_diff_infix);
+        PRINT_STEP("=");
+
+        Tree result = left_diff + right_diff;
+        PRINT_STEP(result.getInfixNotation());
+
+        return result;
       }
       case OPER_MINUS:
       {
@@ -337,6 +402,18 @@ class Tree {
 
         return left_diff * right_subtree + left_subtree * right_diff;
       }
+      case OPER_DIV:
+      {
+        Tree left_diff = diffirentiateRec(node->left_son, variable).root_;
+        Tree right_diff = diffirentiateRec(node->right_son, variable).root_;
+        Tree left_subtree = Tree(node->left_son).copy();
+        Tree right_subtree = Tree(node->right_son).copy();
+
+        Tree numerator = left_diff * right_subtree - left_subtree * right_diff;
+        Tree denominator = right_subtree * right_subtree;
+
+        return numerator / denominator;
+      }
       default:
         throw IncorrectParsingException("unknown node type", __PRETTY_FUNCTION__);
 
@@ -344,17 +421,16 @@ class Tree {
   }
 
   Tree applyOper(const Tree& another, NodeType oper_type) const {
-    std::cout << "I'm trying to apply an operator\n";
+    PRINT_STEP(std::string("Применяю оператор ") + getOperByNodeType(oper_type) + std::string(" к "));
 
     Tree left_son = this->copy();
-    std::cout << "left_son was copied\n";
     Tree right_son = another.copy();
-    std::cout << "right_son was copied\n";
 
-    return Tree(new Node(oper_type, left_son.root_, right_son.root_));
+    return Tree(allocator_.init_alloc(Node(oper_type, left_son.root_, right_son.root_)));
   }
 
  public:
+  static StackAllocator<Node> allocator_;
 
   Tree(const std::string& polish_notation) {
     //std::cout << "polish in " << polish_notation << '\n';
@@ -362,7 +438,7 @@ class Tree {
     std::vector<char> opers;
     std::vector<Node*> operands;
 
-    for (size_t char_id = 0; char_id < polish_notation.size(); ++char_id) {
+    for (int char_id = polish_notation.size() - 1; char_id >= 0; --char_id) {
       char cur_ch = polish_notation[char_id];
 
       if (std::isspace(cur_ch)) {
@@ -370,18 +446,17 @@ class Tree {
       }
       if (isOperator(cur_ch)) {
         opers.push_back(cur_ch);
+        processOpers(&opers, &operands);
       } else if (isCharForDouble(cur_ch)) {
-        double value = parseDouble(polish_notation, &char_id);
+        double value = parseDoubleRev(polish_notation, &char_id);
 
-        operands.push_back(new Node(REAL_NUMBER, value));
+        operands.push_back(allocator_.init_alloc(Node(REAL_NUMBER, value)));
       } else if (isVariable(cur_ch)) {
-        operands.push_back(new Node(VARIABLE, 1, cur_ch));
+        operands.push_back(allocator_.init_alloc(Node(VARIABLE, 1, cur_ch)));
       } else {
         throw IncorrectArgumentException(std::string("incorrect operator or variable: ") + cur_ch,
                                          __PRETTY_FUNCTION__);
       }
-
-      processOpers(&opers, &operands);
     }
 
     if (operands.size() != 1) {
@@ -399,18 +474,30 @@ class Tree {
     return recCopy(root_);
   }
 
+  std::string getInfixNotation() {
+    std::string result = "";
+    getInfixRec(root_, &result);
+
+    return result;
+  }
+
   void printPrefixNotation() {
     printPrefixRec(root_);
     std::cout << '\n';
   }
 
   void printInfixNotation() {
-    printInfixRec(root_);
-    std::cout << '\n';
+    std::cout << getInfixNotation() << '\n';
   }
 
-  Tree derivative(char variable = 'x') {
-    return diffirentiateRec(root_, variable);
+  Tree derivative(char variable = 'x', bool step_by_step = false) {
+    step_by_step_ = step_by_step;
+    PRINT_STEP("диффернём немножечко\n");
+
+    Tree der_tree = diffirentiateRec(root_, variable);
+
+    der_tree.simplify(der_tree.root_);
+    return der_tree;
   }
 
   Tree operator+(const Tree& another) const {
@@ -429,11 +516,50 @@ class Tree {
     return applyOper(another, OPER_DIV);
   }
 
-  ~Tree() {
-    if (root_ != nullptr) {
-      root_->destroy();
-      delete root_;
+  int numerateNode(Node* node, size_t* node_index,
+                      std::vector<std::pair<int, int>>* edge_list, std::vector<std::string>* labels) {
+    if (node == nullptr) {
+      return -1;
     }
+    int left_id = numerateNode(node->left_son, node_index, edge_list, labels);
+    int right_id = numerateNode(node->right_son, node_index, edge_list, labels);
+    int cur_id = (*node_index)++;
+
+    labels->push_back(node->to_str());
+
+    if (left_id != -1) {
+      edge_list->push_back({cur_id, left_id});
+    }
+    if (right_id != -1) {
+      edge_list->push_back({cur_id, right_id});
+    }
+    return cur_id;
+  }
+
+  void drawNodes(const std::vector<std::string>& label_list, FILE* dot_file) {
+    fprintf(dot_file, "    node [style=filled];\n");
+    for (size_t node_id = 0; node_id < label_list.size(); ++node_id) {
+      fprintf(dot_file, "    node%zu  [label=", node_id);
+      fprintf(dot_file, "    %c%s%c];", static_cast<char>(34), label_list[node_id].c_str(), static_cast<char>(34));
+    }
+  }
+
+  void drawEdges(const std::vector<std::pair<int, int>>& edge_list, FILE* dot_file) {
+    for (std::pair<int, int> cur_edge: edge_list) {
+      fprintf(dot_file, "    node%d  -> node%d;", cur_edge.first, cur_edge.second);
+    }
+  }
+
+  void draw(FILE* dot_file) {
+    std::vector<std::pair<int, int>> edge_list;
+    std::vector<std::string> label_list;
+    size_t node_index = 0;
+
+    numerateNode(root_, &node_index, &edge_list, &label_list);
+    fprintf(dot_file, "digraph G {\n");
+    drawNodes(label_list, dot_file);
+    drawEdges(edge_list, dot_file);
+    fprintf(dot_file, "}");
   }
 };
 
