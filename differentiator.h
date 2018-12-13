@@ -16,8 +16,34 @@
 #define PRINT_STEP(text)\
 {\
   if (step_by_step_) {\
-    std::cout << (text);\
+    tex_body_ += (text);\
   }\
+}
+
+#define PRINT_FORMULA(text)\
+{\
+  PRINT_STEP("$");\
+  PRINT_STEP(text);\
+  PRINT_STEP("$");\
+}
+
+#define PRINTLN_STEP(text)\
+{\
+  PRINT_STEP(text);\
+  PRINT_STEP("\n\n");\
+}
+
+#define PRINTLN_FORMULA(text)\
+{\
+  PRINT_FORMULA(text);\
+  PRINT_STEP("\n\n");\
+}
+
+#define PRINT_STEP_NUM()\
+{\
+  PRINTLN_STEP("$ $");\
+  PRINTLN_STEP("\\textbf{Шаг " + std::to_string(step_num_) + "}");\
+  ++step_num_;\
 }
 
 enum NodeType {
@@ -142,7 +168,11 @@ struct Node {
 class Tree {
  private:
   Node* root_{nullptr};
-  bool step_by_step_{false};
+  FILE* step_by_step_{nullptr};
+  size_t step_num_{0};
+  mutable std::string tex_begin_;
+  mutable std::string tex_body_;
+  mutable std::string tex_end_;
 
   double parseDouble(const std::string& str, size_t* pos) {
     size_t cur_pos = *pos;
@@ -334,85 +364,105 @@ class Tree {
     }
   }
 
-  Tree diffirentiateRec(Node* node, char variable) {
+  Tree differentiateRec(Node* node, char variable) {
     if (node == nullptr) {;
       return Tree(node);
     }
 
     if (node->type == REAL_NUMBER || (node->type == VARIABLE && node->var_name != variable)) {
+      PRINT_STEP_NUM();
+      PRINTLN_STEP("В это трудно поверить, но\n");
       PRINT_STEP(node->to_str());
-      PRINT_STEP("'=0\n");
+      PRINTLN_STEP("'=0\n");
 
       return Tree(allocator_.init_alloc(Node(REAL_NUMBER, 0.0)));
     } else if (node->type == VARIABLE && node->var_name == variable) {
+      PRINT_STEP_NUM();
+      PRINTLN_STEP("Если бы вы знали, что такое дифференцирование, то сами могли бы получить, что\n");
       PRINT_STEP(node->to_str());
-      PRINT_STEP("'=1\n");
+      PRINTLN_STEP("'=1\n");
       return Tree(allocator_.init_alloc(Node(REAL_NUMBER, 1.0)));
     }
 
     std::string left_infix = Tree(node->left_son).getInfixNotation();
     std::string right_infix = Tree(node->right_son).getInfixNotation();
+    Tree left_diff = differentiateRec(node->left_son, variable).root_;
+    Tree right_diff = differentiateRec(node->right_son, variable).root_;
+
+    std::string left_diff_infix = left_diff.getInfixNotation();
+    std::string right_diff_infix = right_diff.getInfixNotation();
+
 
     switch (node->type) {
       case OPER_PLUS:
       {
-        PRINT_STEP(std::string("считаем производную суммы "));
-        PRINT_STEP(left_infix + std::string(" и "));
-        PRINT_STEP(right_infix + "\n");
-
-        Tree left_diff = diffirentiateRec(node->left_son, variable).root_;
-        Tree right_diff = diffirentiateRec(node->right_son, variable).root_;
-
-        std::string left_diff_infix = left_diff.getInfixNotation();
-        std::string right_diff_infix = right_diff.getInfixNotation();
-
-
-        PRINT_STEP("(");
-        PRINT_STEP(left_infix + node->to_str());
-        PRINT_STEP(right_infix);
-        PRINT_STEP(")' = ");
-        PRINT_STEP("(");
-        PRINT_STEP(left_infix + ")'+");
-        PRINT_STEP("(");
-        PRINT_STEP(right_infix);
-        PRINT_STEP(")' = ");
-        PRINT_STEP(left_diff_infix);
-        PRINT_STEP("+");
-        PRINT_STEP(right_diff_infix);
-        PRINT_STEP("=");
-
         Tree result = left_diff + right_diff;
-        PRINT_STEP(result.getInfixNotation());
+
+        PRINT_STEP_NUM();
+        PRINTLN_STEP("Это было не просто, но мы посчитали значения производных $" +
+          left_infix + "$ и $" + right_infix + "$");
+        PRINTLN_STEP("Производную суммы будем считать по формуле:");
+        PRINTLN_STEP("$(u+v)' = u' + v'$\n");
+        PRINT_STEP("Получим:\n");
+        PRINTLN_FORMULA("(" + left_infix + " + " + right_infix + ")' = " + left_diff_infix + "' + " + right_diff_infix + "' =");
+        PRINTLN_FORMULA(result.getInfixNotation());
 
         return result;
       }
       case OPER_MINUS:
       {
-        Tree left_diff = diffirentiateRec(node->left_son, variable).root_;
-        Tree right_diff = diffirentiateRec(node->right_son, variable).root_;
+        PRINT_STEP_NUM();
+        PRINTLN_STEP("Методом пристального взгляда были посчитаны производные $" +
+          left_infix + "$ и $" + right_infix + "$");
+        PRINTLN_STEP("Производную разности будем считать по формуле (которую вы, к сожалению, не знаете):");
+        PRINTLN_STEP("$(u-v)' = u' - v'$\n");
+
+        Tree result = left_diff - right_diff;
+
+        PRINT_STEP("Получим:\n");
+        PRINTLN_FORMULA("(" + left_infix + " - " + right_infix + ")' = " + left_diff_infix + "' - " + right_diff_infix + "' =");
+        PRINTLN_FORMULA(result.getInfixNotation());
 
         return left_diff - right_diff;
       }
       case OPER_MUL:
       {
-        Tree left_diff = diffirentiateRec(node->left_son, variable).root_;
-        Tree right_diff = diffirentiateRec(node->right_son, variable).root_;
+        PRINT_STEP_NUM();
+        PRINTLN_STEP("Каким-то чудесным образом были найдены производные $" +
+          left_infix + "$ и $" + right_infix + "$");
+        PRINTLN_STEP("Производную произведения будем считать по известной всем формуле:");
+        PRINTLN_STEP("$(u*v)' = u'v + v'u$\n");
+
         Tree left_subtree = Tree(node->left_son).copy();
         Tree right_subtree = Tree(node->right_son).copy();
+        Tree result = left_diff * right_subtree + left_subtree * right_diff;
 
-        return left_diff * right_subtree + left_subtree * right_diff;
+        PRINT_STEP("Получим:\n");
+        PRINTLN_FORMULA("(" + left_infix + " * " + right_infix + ")' = ");
+        PRINTLN_FORMULA(left_diff_infix + "*" + right_infix + " + " + right_diff_infix + "*" + left_infix + "' =");
+        PRINTLN_FORMULA(result.getInfixNotation());
+
+        return result;
       }
       case OPER_DIV:
       {
-        Tree left_diff = diffirentiateRec(node->left_son, variable).root_;
-        Tree right_diff = diffirentiateRec(node->right_son, variable).root_;
+        PRINT_STEP_NUM();
+        PRINTLN_STEP("Путём мучительных усилий мы продифференцировали $" +
+          left_infix + "$ и $" + right_infix + "$");
+        PRINTLN_STEP("Производную частного будем считать вот так:");
+        PRINTLN_STEP("$(\\frac{u}{v})' = \\frac{u'v - v'u}{v^2}$\n");
+
         Tree left_subtree = Tree(node->left_son).copy();
         Tree right_subtree = Tree(node->right_son).copy();
 
         Tree numerator = left_diff * right_subtree - left_subtree * right_diff;
         Tree denominator = right_subtree * right_subtree;
+        Tree result = numerator / denominator;
 
-        return numerator / denominator;
+        PRINT_STEP("Получим:\n");
+        PRINTLN_FORMULA("(" + left_infix + " / " + right_infix + ")' = ");
+        PRINTLN_FORMULA(result.getInfixNotation());
+        return result;
       }
       default:
         throw IncorrectParsingException("unknown node type", __PRETTY_FUNCTION__);
@@ -490,13 +540,45 @@ class Tree {
     std::cout << getInfixNotation() << '\n';
   }
 
-  Tree derivative(char variable = 'x', bool step_by_step = false) {
+  Tree derivative(char variable = 'x', FILE* step_by_step = nullptr) {
     step_by_step_ = step_by_step;
-    PRINT_STEP("диффернём немножечко\n");
 
-    Tree der_tree = diffirentiateRec(root_, variable);
+    tex_begin_ = "\\documentclass[12pt]{article}\n"
+      "\\usepackage[utf8]{inputenc}\n"
+      "\\usepackage[russian]{babel}\n"
+      "\\usepackage{hyperref}\n"
+      "\\usepackage{color}\n"
+      "\\usepackage{amssymb}\n"
+      "\\usepackage{amsmath}\n"
+      "\\usepackage{graphicx}\n"
+      "\\usepackage{tikz}\n"
+      "\n"
+      "\\author{Differentiator}\n"
+      "\\title{Подсчёт производной функции " + getInfixNotation() +
+      "}\n"
+        "\n"
+        "\\begin{document}\n"
+        "\\maketitle\n";
+    tex_body_ = "";
+    tex_end_ = "\\end{document}";
+
+    PRINTLN_STEP("Диффернём немножечко.\n");
+
+
+
+    Tree der_tree = differentiateRec(root_, variable);
 
     der_tree.simplify(der_tree.root_);
+
+    PRINTLN_STEP("$ $");
+    PRINT_STEP("Производная, которую мы так долго считали:\n");
+    PRINTLN_STEP(der_tree.getInfixNotation());
+    PRINTLN_STEP("$ $");
+    PRINT_STEP("На этом процесс дифференцирования закончен.\n");
+    PRINT_STEP("Надеемся, что вы знаете все использованные в нём слова.\n");
+    fprintf(step_by_step, "%s", tex_begin_.c_str());
+    fprintf(step_by_step, "%s", tex_body_.c_str());
+    fprintf(step_by_step, "%s", tex_end_.c_str());
     return der_tree;
   }
 
